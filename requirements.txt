@@ -1,0 +1,8 @@
+streamlit
+requests
+python-dotenv
+pandas
+fpdf2
+google-generativeai
+PyMuPDF
+bcrypt

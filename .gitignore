@@ -1,0 +1,10 @@
+# Ignorar ambiente virtual e caches
+venv/
+__pycache__/
+.pytest_cache/
+
+# Ignorar chaves e variáveis de ambiente (MUITO IMPORTANTE)
+.env
+
+# Ignorar arquivos temporários do sistema
+.DS_Store
