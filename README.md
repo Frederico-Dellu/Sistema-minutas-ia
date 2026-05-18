@@ -14,7 +14,8 @@
 <br>
 
 ## 📖 Sobre o Projeto
-Uma aplicação web desenvolvida para automatizar e otimizar a rotina de gabinetes jurídicos. O sistema utiliza a API do Google Gemini (Visão e Texto) para analisar múltiplos autos processuais (inclusive PDFs escaneados) e redigir minutas de relatórios padronizados, baseando-se estritamente na base de conhecimento e nos modelos de fundamentação definidos pelos magistrados.
+Uma aplicação web desenvolvida para automatizar e otimizar a rotina de gabinetes jurídicos. O sistema utiliza a API do Google Gemini (Visão e Texto) para analisar múltiplos autos processuais (inclusive PDFs escaneados) e redigir minutas de relatórios padronizados, baseando-se estritamente na base de conhecimento e nos modelos de fundamentação definidos pelos magistrados.<br>
+[📘 Ler Documento Completo de Regras de Negócio (PDF)](docs/Especificacao_Regras_de_Negocio.pdf).
 
 ## ✨ Principais Funcionalidades
 * **Autenticação e Autorização:** Sistema de login com controle de perfis de acesso (Gerente/Funcionário) e proteção de rotas.
