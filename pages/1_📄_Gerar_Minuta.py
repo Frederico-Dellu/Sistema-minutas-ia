@@ -7,6 +7,8 @@ import tempfile
 from dotenv import load_dotenv
 from fpdf import FPDF
 from config import CLASSES_PROCESSUAIS
+import docx
+from io import BytesIO
 
 # ==========================================
 # 1. TRAVA DE SEGURANÇA E ACESSO
@@ -55,20 +57,26 @@ def gerar_arquivo_pdf(texto):
     pdf = FPDF()
     pdf.add_page()
     
-    # Carrega a fonte Arial nativa do Windows para dar suporte total ao UTF-8
-    # Isso evita que símbolos jurídicos como '§' ou acentos virem '?'
     try:
         pdf.add_font("Arial", fname="C:/Windows/Fonts/arial.ttf")
         pdf.set_font("Arial", size=12)
         texto_formatado = texto
     except Exception:
-        # Fallback de segurança caso o sistema mude de servidor/sistema operacional
         pdf.set_font("helvetica", size=12)
         texto_formatado = texto.encode('latin-1', 'replace').decode('latin-1')
         
-    # No fpdf2, usando uma fonte TTF, a quebra de linha com texto longo funciona nativamente em UTF-8
     pdf.multi_cell(0, 7, text=texto_formatado)
     return pdf.output()
+
+def gerar_arquivo_word(texto):
+    doc = docx.Document()
+    for linha in texto.split('\n'):
+        doc.add_paragraph(linha)
+    
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 # ==========================================
 # INTERFACE LATERAL
@@ -80,7 +88,6 @@ with st.sidebar:
     opcoes_menu = ["Selecione..."] + CLASSES_PROCESSUAIS
     classe_processual = st.selectbox("Selecione a Classe Processual", opcoes_menu)
     
-    # Botão para limpar a tela e começar de novo
     if st.button("🔄 Nova Minuta"):
         st.session_state['minuta_atual'] = None
         st.session_state['id_minuta_banco'] = None
@@ -90,12 +97,14 @@ with st.sidebar:
 # ÁREA PRINCIPAL
 # ==========================================
 st.subheader("1. Upload do Processo")
-arquivo_pdf = st.file_uploader("Arraste o PDF do recurso aqui", type="pdf")
+# CORREÇÃO: accept_multiple_files=True adicionado para aceitar vários PDFs de uma vez
+arquivos_pdf = st.file_uploader("Arraste um ou mais PDFs do recurso aqui", type="pdf", accept_multiple_files=True)
 
 st.subheader("2. Seleção de Fundamentação")
 if classe_processual == "Selecione...":
     st.info("👈 Por favor, selecione uma Classe Processual no menu lateral para carregar os modelos.")
     st.stop()
+    
 modelos_encontrados = buscar_modelos_por_classe(classe_processual)
 
 if not modelos_encontrados:
@@ -107,39 +116,50 @@ modelo_selecionado = st.selectbox("Selecione o modelo padrão aprovado:", list(d
 conteudo_fundamentacao = dict_modelos[modelo_selecionado]
 
 # ==========================================
-# GERAÇÃO (Só roda se ainda não tiver minuta na memória)
+# GERAÇÃO (Tratando Lote de Múltiplos PDFs)
 # ==========================================
 if st.button("🚀 Gerar Relatório/Minuta") and st.session_state['minuta_atual'] is None:
-    if not arquivo_pdf:
-        st.error("Por favor, suba o PDF dos autos do processo.")
+    if not arquivos_pdf:
+        st.error("Por favor, suba pelo menos um PDF dos autos do processo.")
     else:
         try:
-            with st.spinner("Lendo documento (processos escaneados podem levar alguns segundos a mais)..."):
-                # 1. Tenta extrair o texto em string (para salvar no banco depois)
-                doc = fitz.open(stream=arquivo_pdf.read(), filetype="pdf")
-                texto_processo = ""
-                for pagina in doc:
-                    texto_processo += pagina.get_text()
+            texto_processo_completo = ""
+            lista_tmp_paths = []
+            lista_arquivos_gemini = []
 
-                # 2. Cria um arquivo temporário no servidor para enviar à IA
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                    arquivo_pdf.seek(0) # Volta o ponteiro de leitura pro começo
-                    tmp_file.write(arquivo_pdf.read())
-                    tmp_file_path = tmp_file.name
-
-            with st.spinner("IA processando os autos e redigindo a minuta..."):
-                try:
-                    # Configura a chave ANTES de fazer qualquer coisa
-                    genai.configure(api_key=CHAVE_GEMINI)
-                    arquivo_gemini = genai.upload_file(path=tmp_file_path, mime_type="application/pdf")
-                    ia = genai.GenerativeModel('gemini-1.5-flash')
+            with st.spinner("Lendo e preparando os documentos (processos escaneados podem levar mais tempo)..."):
+                # Loop para processar e criar arquivos temporários de cada PDF enviado
+                for idx, arquivo_pdf in enumerate(arquivos_pdf):
+                    arquivo_pdf.seek(0)
+                    doc = fitz.open(stream=arquivo_pdf.read(), filetype="pdf")
+                    texto_arquivo = ""
+                    for pagina in doc:
+                        texto_arquivo += pagina.get_text()
                     
-                    # 4. Novo Prompt: Agora ele sabe que deve ler o arquivo anexado
+                    texto_processo_completo += f"\n--- ARQUIVO {idx+1}: {arquivo_pdf.name} ---\n{texto_arquivo}\n"
+
+                    # Salva cópia temporária local de cada arquivo
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        arquivo_pdf.seek(0)
+                        tmp_file.write(arquivo_pdf.read())
+                        lista_tmp_paths.append(tmp_file.name)
+
+            with st.spinner("IA processando o lote de arquivos e redigindo a minuta..."):
+                try:
+                    # Configura a IA
+                    ia = configurar_ia()
+                    
+                    # Faz o upload de todos os arquivos para a API de visão do Gemini
+                    for path in lista_tmp_paths:
+                        arq_g = genai.upload_file(path=path, mime_type="application/pdf")
+                        lista_arquivos_gemini.append(arq_g)
+                    
+                    # Prompt estruturado para múltiplos anexos
                     prompt_completo = f"""
                     Você é um assessor de Desembargador em Câmara Cível. Sua tarefa é redigir uma minuta de relatório processual.
                     
                     REGRAS DE OURO (Siga rigorosamente):
-                    1. FATOS: Extraia a narrativa e os pedidos EXCLUSIVAMENTE do DOCUMENTO PDF ANEXADO. Não invente ou presuma fatos.
+                    1. FATOS: Extraia a narrativa e os pedidos EXCLUSIVAMENTE dos DOCUMENTOS PDF ANEXADOS. Analise o conjunto de arquivos para entender o caso por completo. Não invente ou presuma fatos.
                     2. DIREITO: Utilize a fundamentação jurídica EXCLUSIVAMENTE do 'MODELO DE FUNDAMENTAÇÃO' abaixo.
                     3. ABERTURA: Inicie sempre com: 'Em suas razões recursais, [parte] sustenta que...'.
                     4. VERBOS: Use narra, argumenta, sustenta, aduz, alega.
@@ -152,30 +172,31 @@ if st.button("🚀 Gerar Relatório/Minuta") and st.session_state['minuta_atual'
                     {conteudo_fundamentacao}
                     """
                     
-                    ia = configurar_ia()
+                    # Envia o Prompt de texto + a lista com todos os arquivos carregados
+                    conteudo_para_ia = [prompt_completo] + lista_arquivos_gemini
+                    response = ia.generate_content(conteudo_para_ia)
                     
-                    # 5. Passamos uma LISTA para a IA: O Prompt de texto + O Arquivo PDF
-                    response = ia.generate_content([prompt_completo, arquivo_gemini])
                     st.session_state['minuta_atual'] = response.text
                     
                 finally:
-                    # 6. FAXINA DE SEGURANÇA E LGPD (Muito Importante!)
-                    # Apaga o arquivo lá do Google
-                    if 'arquivo_gemini' in locals():
-                        genai.delete_file(arquivo_gemini.name)
-                    # Apaga o arquivo temporário do nosso servidor
-                    if os.path.exists(tmp_file_path):
-                        os.remove(tmp_file_path)
+                    # FAXINA DE SEGURANÇA E LGPD MULTI-ARQUIVO
+                    for arq_g in lista_arquivos_gemini:
+                        try:
+                            genai.delete_file(arq_g.name)
+                        except:
+                            pass
+                    for path in lista_tmp_paths:
+                        if os.path.exists(path):
+                            os.remove(path)
             
-            # Salvar Histórico Inicial e pegar o ID
+            # Salvar Histórico Inicial no Supabase
             try:
                 headers_insert = HEADERS.copy()
                 headers_insert["Prefer"] = "return=representation" 
                 
-                # Se for escaneado, texto_processo será vazio, mas a IA leu a imagem perfeitamente!
                 dados_minuta = {
                     "classe_processual": classe_processual,
-                    "texto_processo": texto_processo[:5000] if texto_processo else "[PDF Escaneado - Lote de Imagens]", 
+                    "texto_processo": texto_processo_completo[:5000] if texto_processo_completo.strip() else "[Lote de PDFs Escaneados]", 
                     "minuta_final": st.session_state['minuta_atual'],
                     "usuario_email": user['email']
                 }
@@ -183,19 +204,19 @@ if st.button("🚀 Gerar Relatório/Minuta") and st.session_state['minuta_atual'
                 
                 if res_db.status_code == 201:
                     st.session_state['id_minuta_banco'] = res_db.json()[0]['id'] 
-            except Exception as e_bd:
+            except Exception:
                 pass
 
             st.rerun() 
             
         except Exception as e:
-            st.error(f"Erro técnico: {e}")
+            st.error(f"Erro técnico ao processar lote: {e}")
 
 # ==========================================
 # ÁREA DE EDIÇÃO E VERSIONAMENTO (Aparece após gerar)
 # ==========================================
 if st.session_state['minuta_atual']:
-    st.success("✨ Minuta gerada! Revise e ajuste abaixo.")
+    st.success("✨ Minuta gerada com sucesso com base no lote de documentos!")
     
     st.subheader("3. Revisão Final e Versionamento")
     texto_editado = st.text_area("Faça os ajustes manuais necessários antes de baixar:", 
@@ -217,14 +238,21 @@ if st.session_state['minuta_atual']:
 
     st.divider()
     
-    col_txt, col_pdf = st.columns(2)
+    # Botões de Exportação atualizados com suporte a TXT, PDF e o novo arquivo Word DOCX
+    col_txt, col_pdf, col_word = st.columns(3)
+    
     with col_txt:
         st.download_button("📥 Baixar em .TXT", data=st.session_state['minuta_atual'], file_name=f"Minuta_{classe_processual}.txt")
+    
     with col_pdf:
         pdf_bytes = gerar_arquivo_pdf(st.session_state['minuta_atual'])
+        st.download_button("📄 Baixar em .PDF", data=pdf_bytes, file_name=f"Minuta_{classe_processual}.pdf", mime="application/pdf")
+    
+    with col_word:
+        word_buffer = gerar_arquivo_word(st.session_state['minuta_atual'])
         st.download_button(
-            "📄 Baixar em .PDF", 
-            data=pdf_bytes, 
-            file_name=f"Minuta_{classe_processual}.pdf", 
-            mime="application/pdf"
+            label="💙 Baixar em .DOCX",
+            data=word_buffer,
+            file_name=f"Minuta_{classe_processual}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )

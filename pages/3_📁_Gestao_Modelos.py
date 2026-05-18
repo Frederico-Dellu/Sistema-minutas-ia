@@ -5,6 +5,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 from config import CLASSES_PROCESSUAIS
+import docx
 
 # ==========================================
 # 1. TRAVA DE SEGURANÇA E ACESSO (RN001 e RN007)
@@ -43,22 +44,33 @@ with st.expander("➕ Adicionar Novo Modelo (Upload de PDF)", expanded=True):
         classe_processual = st.selectbox("Vincular à Classe Processual:", CLASSES_PROCESSUAIS)
     
     with col2:
-        arquivo_modelo = st.file_uploader("Suba o PDF com a fundamentação padrão", type="pdf")
+    # MODIFICAÇÃO: Aceita PDF e DOCX
+        arquivo_modelo = st.file_uploader("Suba o arquivo com a fundamentação padrão", type=["pdf", "docx"])
 
-    if st.button("💾 Salvar Modelo no Banco de Dados"):
-        if not titulo_modelo or not arquivo_modelo:
-            st.error("Por favor, preencha o título e faça o upload do PDF.")
-        else:
-            try:
-                # Extrai o texto do PDF que o Gerente subiu
-                with st.spinner("Extraindo texto do modelo..."):
+if st.button("💾 Salvar Modelo no Banco de Dados"):
+    if not titulo_modelo or not arquivo_modelo:
+        st.error("Por favor, preencha o título e faça o upload do arquivo.")
+    else:
+        try:
+            texto_modelo = ""
+            with st.spinner("Extraindo texto do modelo..."):
+                # Lógica para PDF
+                if arquivo_modelo.type == "application/pdf":
                     doc = fitz.open(stream=arquivo_modelo.read(), filetype="pdf")
-                    texto_modelo = ""
                     for pagina in doc:
-                        if len(texto_modelo.strip()) < 50:
-                            st.error("🚨 O PDF enviado está vazio ou é um documento escaneado (imagem). A Central de Modelos exige PDFs com texto pesquisável.")
-                            st.stop()
                         texto_modelo += pagina.get_text()
+                
+                # Lógica para WORD
+                else:
+                    doc_word = docx.Document(arquivo_modelo)
+                    for para in doc_word.paragraphs:
+                        texto_modelo += para.text + "\n"
+
+            # Validação de PDF/Word vazio (conforme sugerido pelo Codex)
+            if len(texto_modelo.strip()) < 50:
+                st.error("🚨 O arquivo enviado parece estar vazio ou não contém texto extraível.")
+                st.stop()
+                texto_modelo += pagina.get_text()
 
                 # Prepara os dados para salvar na tabela que criamos
                 dados_modelo = {
@@ -79,7 +91,7 @@ with st.expander("➕ Adicionar Novo Modelo (Upload de PDF)", expanded=True):
                 else:
                     st.warning(f"Erro ao salvar: {resposta.text}")
                     
-            except Exception as e:
+        except Exception as e:
                 st.error(f"Ocorreu um erro ao processar o PDF: {e}")
 
 st.divider()
