@@ -1,14 +1,14 @@
 import streamlit as st
-import fitz  # PyMuPDF
 import requests
 import os
-import pandas as pd
+import fitz  # PyMuPDF
+import docx
+import time  # <-- MODIFICAÇÃO: Importação da biblioteca de tempo
 from dotenv import load_dotenv
 from config import CLASSES_PROCESSUAIS
-import docx
 
 # ==========================================
-# 1. TRAVA DE SEGURANÇA E ACESSO (RN001 e RN007)
+# 1. TRAVA DE SEGURANÇA E ACESSO
 # ==========================================
 if "usuario" not in st.session_state or st.session_state["usuario"] is None:
     st.warning("⚠️ Você precisa fazer login na Tela Inicial para acessar esta página.")
@@ -16,108 +16,117 @@ if "usuario" not in st.session_state or st.session_state["usuario"] is None:
 
 user = st.session_state["usuario"]
 
-# Trava de Perfil: Apenas Líder/Gerente entra aqui
 if user.get("funcao") != "Gerente":
-    st.error("⛔ Acesso Restrito. Apenas usuários com perfil de Líder de Gabinete podem gerenciar a base de modelos.")
+    st.error("⛔ Acesso Restrito. Apenas Líderes de Gabinete podem gerenciar modelos de fundamentação.")
     st.stop()
 
 # ==========================================
-# 2. CONFIGURAÇÕES
+# 2. CONFIGURAÇÕES E CONEXÃO
 # ==========================================
 st.set_page_config(page_title="Gestão de Modelos", layout="wide")
-st.title("📁 Gestão de Modelos da IA")
-st.write("Faça o upload de processos que servirão como **padrão de fundamentação** para o sistema.")
+st.title("📁 Central de Modelos de Fundamentação")
 
 load_dotenv()
 URL_SUPABASE = os.getenv("SUPABASE_URL")
 KEY_SUPABASE = os.getenv("SUPABASE_KEY")
-HEADERS = {"apikey": KEY_SUPABASE, "Authorization": f"Bearer {KEY_SUPABASE}", "Content-Type": "application/json"}
+HEADERS = {
+    "apikey": KEY_SUPABASE,
+    "Authorization": f"Bearer {KEY_SUPABASE}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
+ENDPOINT = f"{URL_SUPABASE}/rest/v1/modelos_fundamentacao"
 
-# ==========================================
-# 3. UPLOAD E CADASTRO DO NOVO MODELO
-# ==========================================
-with st.expander("➕ Adicionar Novo Modelo (Upload de PDF)", expanded=True):
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        titulo_modelo = st.text_input("Nome/Título do Modelo (Ex: Padrão Desembargador X - Dano Moral)")
-        classe_processual = st.selectbox("Vincular à Classe Processual:", CLASSES_PROCESSUAIS)
-    
-    with col2:
-    # MODIFICAÇÃO: Aceita PDF e DOCX
-        arquivo_modelo = st.file_uploader("Suba o arquivo com a fundamentação padrão", type=["pdf", "docx"])
-
-if st.button("💾 Salvar Modelo no Banco de Dados"):
-    if not titulo_modelo or not arquivo_modelo:
-        st.error("Por favor, preencha o título e faça o upload do arquivo.")
-    else:
-        try:
-            texto_modelo = ""
-            with st.spinner("Extraindo texto do modelo..."):
-                # Lógica para PDF
-                if arquivo_modelo.type == "application/pdf":
-                    doc = fitz.open(stream=arquivo_modelo.read(), filetype="pdf")
-                    for pagina in doc:
-                        texto_modelo += pagina.get_text()
-                
-                # Lógica para WORD
-                else:
-                    doc_word = docx.Document(arquivo_modelo)
-                    for para in doc_word.paragraphs:
-                        texto_modelo += para.text + "\n"
-
-            # Validação de PDF/Word vazio (conforme sugerido pelo Codex)
-            if len(texto_modelo.strip()) < 50:
-                st.error("🚨 O arquivo enviado parece estar vazio ou não contém texto extraível.")
-                st.stop()
-                texto_modelo += pagina.get_text()
-
-                # Prepara os dados para salvar na tabela que criamos
-                dados_modelo = {
-                    "titulo": titulo_modelo,
-                    "classe_processual": classe_processual,
-                    "conteudo_abstrato": texto_modelo,
-                    "autor_email": user['email']
-                }
-                
-                # Salva no Supabase via API REST
-                endpoint = f"{URL_SUPABASE}/rest/v1/modelos_fundamentacao"
-                resposta = requests.post(endpoint, headers=HEADERS, json=dados_modelo)
-                
-                if resposta.status_code == 201:
-                    st.success("✅ Modelo cadastrado com sucesso! Ele já pode ser usado pela IA.")
-                    # Limpa o cache para atualizar a tabela abaixo automaticamente
-                    st.cache_data.clear() 
-                else:
-                    st.warning(f"Erro ao salvar: {resposta.text}")
-                    
-        except Exception as e:
-                st.error(f"Ocorreu um erro ao processar o PDF: {e}")
-
-st.divider()
-
-# ==========================================
-# 4. VISUALIZAR MODELOS EXISTENTES
-# ==========================================
-st.subheader("📚 Modelos Ativos na Central de Dados")
-
-@st.cache_data(ttl=60)
-def buscar_modelos():
-    url = f"{URL_SUPABASE}/rest/v1/modelos_fundamentacao?select=created_at,titulo,classe_processual,autor_email&order=created_at.desc"
+# Função para buscar os modelos cadastrados
+def buscar_todos_modelos():
     try:
-        res = requests.get(url, headers=HEADERS)
+        res = requests.get(f"{ENDPOINT}?select=*", headers=HEADERS)
         if res.status_code == 200:
             return res.json()
     except:
         return []
     return []
 
-lista_modelos = buscar_modelos()
+modelos_banco = buscar_todos_modelos()
 
-if not lista_modelos:
-    st.info("Nenhum modelo cadastrado ainda.")
-else:
-    df_modelos = pd.DataFrame(lista_modelos)
-    df_modelos['created_at'] = pd.to_datetime(df_modelos['created_at']).dt.strftime('%d/%m/%Y')
-    df_modelos.columns = ['Data de Inclusão', 'Título do Modelo', 'Classe Processual', 'Cadastrado por']
-    st.dataframe(df_modelos, use_container_width=True, hide_index=True)
+# ==========================================
+# 3. INTERFACE EM ABAS
+# ==========================================
+aba_listar, aba_cadastrar = st.tabs(["📋 Modelos Cadastrados", "➕ Adicionar Novo Modelo"])
+
+# --- ABA 1: LISTAR MODELOS EXISTENTES ---
+with aba_listar:
+    if not modelos_banco:
+        st.info("Nenhum modelo cadastrado na central.")
+    else:
+        for m in modelos_banco:
+            with st.expander(f"📘 {m['classe_processual']} - {m['titulo']}"):
+                st.text_area("Conteúdo da Fundamentação:", value=m['conteudo_abstrato'], height=200, disabled=True, key=f"ver_{m['id']}")
+                
+                if st.button("🗑️ Excluir Modelo", key=f"del_{m['id']}"):
+                    res_del = requests.delete(f"{ENDPOINT}?id=eq.{m['id']}", headers=HEADERS)
+                    if res_del.status_code in [200, 204]:
+                        st.success("Modelo removido com sucesso!")
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"Erro ao deletar do banco: {res_del.text}")
+
+# --- ABA 2: CADASTRAR NOVO MODELO (PDF/WORD) ---
+with aba_cadastrar:
+    with st.form("form_cadastro_modelo", clear_on_submit=True):
+        st.subheader("Cadastrar Nova Peça de Fundamentação")
+        
+        classe_selecionada = st.selectbox("Classe Processual do Modelo", CLASSES_PROCESSUAIS)
+        titulo_modelo = st.text_input("Título do Modelo (ex: Dano Moral - Inscrição Indevida)")
+        
+        arquivo_modelo = st.file_uploader(
+            "Suba o arquivo com a fundamentação padrão (Texto em PDF ou Word .docx)", 
+            type=["pdf", "docx"]
+        )
+        
+        btn_salvar = st.form_submit_button("💾 Salvar Modelo no Banco de Dados")
+        
+        if btn_salvar:
+            if not titulo_modelo:
+                st.error("❌ Por favor, insira um título para o modelo.")
+            elif not arquivo_modelo:
+                st.error("❌ Por favor, faça o upload de um arquivo PDF ou DOCX.")
+            else:
+                try:
+                    texto_modelo = ""
+                    arquivo_modelo.seek(0)
+                    
+                    with st.spinner("Extraindo texto do arquivo enviado..."):
+                        if arquivo_modelo.name.endswith(".pdf"):
+                            doc = fitz.open(stream=arquivo_modelo.read(), filetype="pdf")
+                            for pagina in doc:
+                                texto_modelo += pagina.get_text()
+                        
+                        elif arquivo_modelo.name.endswith(".docx"):
+                            doc_word = docx.Document(arquivo_modelo)
+                            for para in doc_word.paragraphs:
+                                if para.text.strip():
+                                    texto_modelo += para.text + "\n"
+                    
+                    if len(texto_modelo.strip()) < 50:
+                        st.error("🚨 O arquivo enviado está praticamente vazio ou não possui texto extraível.")
+                    else:
+                        payload = {
+                            "classe_processual": classe_selecionada,
+                            "titulo": titulo_modelo,
+                            "conteudo_abstrato": texto_modelo.strip()
+                        }
+                        
+                        response = requests.post(ENDPOINT, headers=HEADERS, json=payload)
+                        
+                        if response.status_code in [200, 201]:
+                            # MODIFICAÇÃO: Mensagem grande, chamativa e com pausa dramática
+                            st.success(f"🎉 SUCESSO! O modelo '{titulo_modelo}' foi gravado no banco de dados!")
+                            time.sleep(3)  # O sistema vai aguardar 3 segundos com a mensagem verde na tela
+                            st.rerun()     # Depois de 3 segundos, recarrega a página de forma limpa
+                        else:
+                            st.error(f"❌ Erro na API do Banco de Dados ({response.status_code}): {response.text}")
+                            
+                except Exception as e:
+                    st.error(f"💥 Erro técnico inesperado no processamento: {e}")

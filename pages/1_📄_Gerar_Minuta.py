@@ -41,7 +41,7 @@ if 'id_minuta_banco' not in st.session_state:
 # ==========================================
 def configurar_ia():
     genai.configure(api_key=CHAVE_GEMINI)
-    return genai.GenerativeModel('gemini-1.5-flash')
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 def buscar_modelos_por_classe(classe):
     url = f"{URL_SUPABASE}/rest/v1/modelos_fundamentacao?classe_processual=eq.{classe}&select=titulo,conteudo_abstrato"
@@ -66,7 +66,7 @@ def gerar_arquivo_pdf(texto):
         texto_formatado = texto.encode('latin-1', 'replace').decode('latin-1')
         
     pdf.multi_cell(0, 7, text=texto_formatado)
-    return pdf.output()
+    return bytes (pdf.output())
 
 def gerar_arquivo_word(texto):
     doc = docx.Document()
