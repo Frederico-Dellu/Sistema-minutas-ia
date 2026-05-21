@@ -92,11 +92,24 @@ else:
     else:
         df_filtrado = df
 
-    # Seleciona apenas as colunas que queremos mostrar e renomeia para ficar bonito
-    df_exibicao = df_filtrado[['created_at', 'classe_processual', 'usuario_email', 'minuta_final']]
-    df_exibicao.columns = ['Data/Hora', 'Classe Processual', 'Responsável', 'Texto da Minuta']
+    # ===================================================================
+    # MODIFICAÇÃO DE PRIVACIDADE (Mapeamento Seguro de Colunas)
+    # Selecionamos apenas os metadados não-sensíveis para exibição
+    # ===================================================================
+    colunas_seguras = ['created_at', 'classe_processual', 'usuario_email']
+    colunas_disponiveis = [col for col in colunas_seguras if col in df_filtrado.columns]
+    
+    df_exibicao = df_filtrado[colunas_disponiveis]
+    
+    # Renomeia os cabeçalhos para o usuário final de forma elegante
+    nomes_colunas = {
+        'created_at': 'Data/Hora',
+        'classe_processual': 'Classe Processual',
+        'usuario_email': 'Responsável'
+    }
+    df_exibicao = df_exibicao.rename(columns=nomes_colunas)
 
-    # Mostra a tabela na tela
+    # Mostra a tabela limpa na tela
     st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
 
     # Botão de Exportação

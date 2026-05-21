@@ -201,17 +201,21 @@ if st.button("🚀 Gerar Relatório/Minuta") and st.session_state['minuta_atual'
                 
                 dados_minuta = {
                     "classe_processual": classe_processual,
-                    "texto_processo": texto_processo_completo[:5000] if texto_processo_completo.strip() else "[Lote de PDFs Escaneados]", 
-                    "minuta_final": st.session_state['minuta_atual'],
-                    "usuario_email": user['email']
+                    "usuario_email": user.get('email', 'N/A'),
+                    "texto_processo": "[ARQUIVO DESCARTADO - DIRETRIZ LGPD]", 
+                    "minuta_final": "[TEXTO NÃO ARMAZENADO - PRIVACY BY DESIGN]"
                 }
+                
                 res_db = requests.post(f"{URL_SUPABASE}/rest/v1/historico_minutas", headers=headers_insert, json=dados_minuta)
                 
-                if res_db.status_code == 201:
-                    st.session_state['id_minuta_banco'] = res_db.json()[0]['id'] 
-            except Exception:
-                pass
-
+                # Se o banco retornar qualquer código diferente de Sucesso (201), mostra o erro na tela
+                if res_db.status_code != 201:
+                    st.error(f"⚠️ O Supabase recusou a gravação (Código {res_db.status_code}): {res_db.text}")
+                else:
+                    st.toast("Estatísticas enviadas ao banco com sucesso!", icon="📊")
+                    
+            except Exception as e:
+                st.error(f"💥 Erro técnico ao tentar conectar com o banco: {e}")
             st.rerun() 
             
         except Exception as e:
@@ -229,17 +233,6 @@ if st.session_state['minuta_atual']:
     
     if texto_editado != st.session_state['minuta_atual']:
         st.session_state['minuta_atual'] = texto_editado
-
-    if st.button("💾 Salvar Edição no Histórico"):
-        if st.session_state['id_minuta_banco']:
-            url_update = f"{URL_SUPABASE}/rest/v1/historico_minutas?id=eq.{st.session_state['id_minuta_banco']}"
-            res_patch = requests.patch(url_update, headers=HEADERS, json={"minuta_final": st.session_state['minuta_atual']})
-            if res_patch.status_code in [200, 204]:
-                st.success("✅ A versão final editada foi salva no banco de dados!")
-            else:
-                st.error("Erro ao atualizar o banco.")
-        else:
-            st.warning("O ID da minuta não foi encontrado no banco.")
 
     st.divider()
     
