@@ -7,6 +7,7 @@ import tempfile
 from dotenv import load_dotenv
 from fpdf import FPDF
 from config import CLASSES_PROCESSUAIS
+from prompts import PROMPT_ESTAGIARIO
 import docx
 from io import BytesIO
 
@@ -156,20 +157,24 @@ if st.button("🚀 Gerar Relatório/Minuta") and st.session_state['minuta_atual'
                     
                     # Prompt estruturado para múltiplos anexos
                     prompt_completo = f"""
-                    Você é um assessor de Desembargador em Câmara Cível. Sua tarefa é redigir uma minuta de relatório processual.
+                    {PROMPT_ESTAGIARIO}
                     
-                    REGRAS DE OURO (Siga rigorosamente):
-                    1. FATOS: Extraia a narrativa e os pedidos EXCLUSIVAMENTE dos DOCUMENTOS PDF ANEXADOS. Analise o conjunto de arquivos para entender o caso por completo. Não invente ou presuma fatos.
-                    2. DIREITO: Utilize a fundamentação jurídica EXCLUSIVAMENTE do 'MODELO DE FUNDAMENTAÇÃO' abaixo.
-                    3. ABERTURA: Inicie sempre com: 'Em suas razões recursais, [parte] sustenta que...'.
-                    4. VERBOS: Use narra, argumenta, sustenta, aduz, alega.
-                    5. REQUERIMENTOS: Tutelas provisórias são sempre listadas como REQUERIMENTOS.
-                    6. FECHAMENTO: Encerre o texto com: 'É o relatório.'
+                    ===================================================================
+                    INSTRUÇÃO DE EXECUÇÃO ATUAL:
+                    Atue agora mesmo aplicando o comando '/minuta'. 
                     
+                    REGRAS DE FORMATAÇÃO DA RESPOSTA:
+                    - Retorne EXCLUSIVAMENTE o texto final da minuta jurídica, começando diretamente nos fatos/relatório.
+                    - É TERMINANTEMENTE PROIBIDO incluir saudações, introduções, conversas, notas de rodapé ou perguntas ao operador (como "Com prazer, Assessor!", "Identifiquei as seguintes peças..." ou "Deseja que eu prossiga?").
+                    - Vá direto ao ponto. Sua resposta deve conter apenas o documento que será baixado.
+
+                    DADOS PARA A TAREFA:
                     CLASSE PROCESSUAL: {classe_processual}
                     
-                    === MODELO DE FUNDAMENTAÇÃO (DIREITO) ===
+                    === MODELO DE FUNDAMENTAÇÃO (DIREITO) A SER UTILIZADO ===
                     {conteudo_fundamentacao}
+                    
+                    Analise os documentos PDF em anexo e elabore a minuta completa aplicando RIGOROSAMENTE todas as suas regras de identidade, segurança (LGPD), formatação e jurisprudência definidas no seu sistema.
                     """
                     
                     # Envia o Prompt de texto + a lista com todos os arquivos carregados
